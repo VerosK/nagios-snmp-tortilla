@@ -1,0 +1,134 @@
+#!/usr/bin/env python
+
+import sys
+import pysnmp
+from ConfigParser import ConfigParser, NoOptionError
+from optparse import OptionParser
+
+import time
+import string
+
+OK = 0
+WARNING = 1
+CRITICAL = 2
+UNKNOWN = 3
+ERROR = 4
+
+CONFIG = 'pdu.ini'
+
+class Device(object):
+	def __init__(self, config, host, snmp_community='public'):
+		self.config = config
+		self.host = host
+		self.snmp_community = snmp_community
+		self.output = []
+		self.extra = []
+
+	def run_checks(self):
+		config = self.config
+		retv = OK
+		for i in config.sections():
+			if not i.startswith('value:'):
+				continue
+			value = i.split(':',1)[1]	
+			retv = max(retv, self.check_value(value))
+		print '%s' % '; '.join(self.output),
+		if self.extra:
+			print '|',' '.join(self.extra)
+		return retv
+
+	def _config_get(self, section, key, default=None):
+		try:
+			return self.config.get(section, key)
+		except NoOptionError:
+			return default
+
+	def check_value(self, value):
+		config = self.config
+		config_get = self._config_get
+		section = 'value:%s' % value
+		oid = config.get(section, 'oid')
+		func = config_get(section, 'func', default=None)
+		if not func:
+			func = lambda x: x
+		else:
+			func = eval(func)
+		assert callable(func), func
+		units = config_get(section, 'units', '')
+		# obtain value and cook it	
+		try:
+			raw_value = self._get_snmp_value(oid)
+		except ValueError:
+			self.output.append('%(value)s UNKNOWN' % locals())
+			return UNKNOWN
+		cooked = func(raw_value)
+		# check limits
+		is_warning = is_critical = False
+		warning = config_get(section, 'warning')
+		critical = config_get(section, 'critical')
+		variables = {value: cooked}
+		#
+		if critical:
+			is_critical = eval(critical, {}, variables)
+		if warning:
+			is_warning = eval(warning, {}, variables)
+		if is_critical:
+			retv = CRITICAL
+		elif is_warning:
+			retv = WARNING
+		else:
+			retv = OK
+		#
+		return_str = []
+		return_str.append('%(value)s = %(cooked)s %(units)s' % \
+			locals())
+		self.extra.append('%(value)s=%(cooked)s%(units)s' % \
+				locals())
+		if is_critical:
+			return_str.append('[CRITICAL %(critical)s]' % locals())
+		elif is_warning:
+			return_str.append('[WARNING %(warning)s]' % locals())
+		self.output.append(' '.join(return_str))
+		return retv
+
+
+	def _get_snmp_value(self, oid):
+		from pysnmp.entity.rfc3413.oneliner import cmdgen
+		from pysnmp.proto.api.v1 import ObjectIdentifier as OID
+		errorIndication, errorStatus, errorIndex, values \
+			= cmdgen.CommandGenerator().getCmd(
+			    cmdgen.CommunityData(self.host, self.snmp_community, 0),
+			    cmdgen.UdpTransportTarget((self.host, 161)),
+			OID(oid)
+		)
+		if errorIndication or errorStatus:
+			raise ValueError, errorIndication or errorStatus
+		assert len(values) == 1, values
+		return values[0][1]
+
+def main():
+	parser = OptionParser()
+	parser.add_option("-H", "--host", dest="host", 
+                  help="connect to HOSTNAME", metavar="HOSTNAME")
+	parser.add_option("-c", "--config-file", dest="config_file",
+                  help="use config file")
+	parser.add_option("-C", "--community", dest="snmp_community",
+		  metavar = 'SNMP_COMMUNITY',
+		  default = 'public', help="SNMP community to use")
+	(options, args) = parser.parse_args()
+	if options.host is None:
+		print 'Error: Need to set HOSTNAME\n\n'
+		parser.print_help()
+		raise SystemExit(ERROR)
+	if options.config_file is None:
+		print 'Error: Need to set config file\n\n'
+		parser.print_help()
+		raise SystemExit(ERROR)
+	config = ConfigParser()
+	config.read([options.config_file])
+	test = Device(config=config, host=options.host, 
+			snmp_community=options.snmp_community)
+	raise SystemExit, test.run_checks()
+		
+if __name__ == '__main__':
+	main()	

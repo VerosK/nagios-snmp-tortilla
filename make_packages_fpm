@@ -1,0 +1,48 @@
+#!/bin/bash
+
+# prepare RPM a DEB packages using
+# Effing Package Manager ( see https://github.com/jordansissel/fpm )
+
+set -ex
+TARGET_DIR=/opt/nagios-plugins
+PACKAGE_NAME=snmp-tortilla
+TMPDIR=`mktemp -d /tmp/tmp.fpm.XXXXXXXXXX`
+RELEASE=`date +%Y%m%d`
+EPOCH=$[ $(date +%s ) - 1363388400 ]
+
+mkdir ${TMPDIR}/bin
+mkdir ${TMPDIR}/ini
+mkdir ${TMPDIR}/cfg
+cp -r src/check_snmp_tortilla ${TMPDIR}/bin/check_snmp_tortilla
+cp -r ini/*.ini ${TMPDIR}/ini
+for fname in ini/*.ini; do	
+	base=$( basename $fname .ini )
+	cat > $TMPDIR/cfg/check-${base}.cfg <<EOF 
+# from $fname
+define command {
+	command_name	check-${base}
+	command_line	$TARGET_DIR/$PACKAGE_NAME/bin/check_snmp_tortilla -c $TARGET_DIR/$PACKAGE_NAME/ini/$base.ini -H \$HOSTADDRESS\$ -C public
+}
+EOF
+
+done
+
+if ! which fpm; then # prepare fpm
+	module add fpm
+fi
+fpm -s dir -t rpm -C ${TMPDIR} --prefix ${TARGET_DIR}/${PACKAGE_NAME} \
+	-n ${PACKAGE_NAME} -v1 --iteration ${RELEASE} --epoch ${EPOCH}  \
+	--license 3BSD -d python -d net-snmp-utils -d python-pysnmp -d python-pyasn1 -a all \
+	--url https://github.com/VerosK/nagios-snmp-tortilla \
+	--verbose \
+	bin ini cfg
+
+fpm -s dir -t deb -C ${TMPDIR} --prefix ${TARGET_DIR}/${PACKAGE_NAME} \
+	-n ${PACKAGE_NAME} -v1 --iteration ${RELEASE} --epoch ${EPOCH}  \
+	--license 3BSD -d python -d net-snmp-utils -a all -d python-pysnmp4-apps \
+	--url https://github.com/VerosK/nagios-snmp-tortilla \
+	--verbose \
+	bin ini cfg
+
+rm -rf ${TMPDIR}
+
