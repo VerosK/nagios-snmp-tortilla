@@ -124,8 +124,13 @@ def main():
 		print 'Error: Need to set config file\n\n'
 		parser.print_help()
 		raise SystemExit(ERROR)
+
 	config = ConfigParser()
-	config.read([options.config_file])
+	parsed = config.read([options.config_file])
+	if len(parsed) == 0:
+		print "Error: Unable to read config '%s'" % options.config_file
+		raise SystemExit(ERROR)
+
 	test = Device(config=config, host=options.host, 
 			snmp_community=options.snmp_community)
 	raise SystemExit, test.run_checks()
