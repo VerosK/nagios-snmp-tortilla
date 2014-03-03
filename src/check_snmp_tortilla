@@ -14,8 +14,6 @@ CRITICAL = 2
 UNKNOWN = 3
 ERROR = 4
 
-CONFIG = 'pdu.ini'
-
 class Device(object):
 	def __init__(self, config, host, snmp_community='public'):
 		self.config = config
@@ -49,6 +47,7 @@ class Device(object):
 		section = 'value:%s' % value
 		oid = config.get(section, 'oid')
 		func = config_get(section, 'func', default=None)
+		label = config_get(section, 'name', default=section)
 		if not func:
 			func = lambda x: x
 		else:
@@ -80,7 +79,7 @@ class Device(object):
 			retv = OK
 		#
 		return_str = []
-		return_str.append('%(value)s = %(cooked)s %(units)s' % \
+		return_str.append('%(label)s = %(cooked)s %(units)s' % \
 			locals())
 		self.extra.append('%(value)s=%(cooked)s%(units)s' % \
 				locals())
